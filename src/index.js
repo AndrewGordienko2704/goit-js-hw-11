@@ -31,10 +31,7 @@ let observer = new IntersectionObserver(handleIntersect, observerOptions);
 async function onSearch(event) {
   event.preventDefault();
 
-  //   const {
-  //     elements: { searchQuery },
-  //   } = event.currentTarget;
-  //   const newUserInput = searchQuery.value;
+  
   const newUserInput = event.currentTarget.elements.searchQuery.value.trim();
 
   if (userInput !== newUserInput) {
