@@ -1,149 +1,100 @@
-// import InfiniteScroll from 'infinite-scroll';
-// import libraries
-import { Notify } from 'notiflix';
-import SimpleLightbox from 'simplelightbox';
-import 'simplelightbox/dist/simple-lightbox.min.css';
-// import classes
-import PostApiService from './js/posts-servise';
-import LoadMoreBtn from './js/load-more-btn';
-import PageLoadStatus from './js/load-status';
-import formSticky from './js/form-sticky';
-// get elements
-const refs = {
-  formSearch: document.querySelector('.search-form'),
-  gallery: document.querySelector('.gallery'),
-};
-// Create exemples classes
-const loadMoreBtn = new LoadMoreBtn({
-  selector: '.load-more',
-  hidden: true,
-});
+import { fetchPixabay } from './js/fetch_pixabay';
+import { showMessage } from './js/notify_message';
+import { createMarkup } from './js/markup';
+import { simpleLightbox } from './js/simple_lightbox';
+import { scrollGallery } from './js/scroll_gallery';
+import './js/scrollup-button';
 
-const pageLoadStatus = new PageLoadStatus({
-  selector: '.page-load-status',
-});
-
-const postApiService = new PostApiService();
-const lightbox = new SimpleLightbox('.gallery__item', {
-  captionDelay: 250,
-  captionsData: 'alt',
-  enableKeyboard: true,
-});
-const obsOptions = {
+let userInput = '';
+let page = 1;
+let pages = 1;
+const perPage = 40;
+let isInfinityLoad;
+let observerOptions = {
   root: null,
-  rootMargin: '100px',
-  treshold: 1,
+  rootMargin: '500px',
+  threshold: 1.0,
 };
-const observer = new IntersectionObserver(onLoading, obsOptions);
 
-// Make add event listener
-refs.formSearch.addEventListener('submit', onSearch);
-loadMoreBtn.refs.button.addEventListener('click', onLoadMore);
-window.addEventListener('scroll', formSticky);
+const gallery = document.querySelector('.js-gallery');
+const form = document.querySelector('#search-form');
+const buttonLoad = document.querySelector('.js-load-more');
+const observerTarget = document.querySelector('.js-observer-target');
+const checkbox = document.querySelector('.js-checkbox');
 
-// Event search btn
-function onSearch(e) {
-  e.preventDefault();
-  pageLoadStatus.hide();
+form.addEventListener('submit', onSearch);
+buttonLoad.addEventListener('click', onLoadGallery);
+checkbox.addEventListener('change', setInfinityLoad);
 
-  postApiService.query = e.target.searchQuery.value.trim();
-  loadMoreBtn.show();
-  postApiService.resetPage();
-  clearGallery();
-  fetchPosts();
+let observer = new IntersectionObserver(handleIntersect, observerOptions);
+
+async function onSearch(event) {
+  event.preventDefault();
+
+  //   const {
+  //     elements: { searchQuery },
+  //   } = event.currentTarget;
+  //   const newUserInput = searchQuery.value;
+  const newUserInput = event.currentTarget.elements.searchQuery.value.trim();
+
+  if (userInput !== newUserInput) {
+    userInput = newUserInput;
+    pages = 1;
+    onCleanGallery();
+    observer.unobserve(observerTarget);
+  }
+  if (userInput && pages >= page) {
+    isInfinityLoad ? observer.observe(observerTarget) : await onLoadGallery();
+  }
 }
 
-function onLoadMore() {
-  fetchPosts();
-
-  pageLoadStatus.show();
-  observer.observe(pageLoadStatus.refs.pageLoadStatus);
+function onCleanGallery() {
+  gallery.innerHTML = '';
+  observerTarget.textContent = '';
+  buttonLoad.hidden = true;
+  page = 1;
 }
 
-// Get posts
-function fetchPosts() {
-  loadMoreBtn.hide();
-  pageLoadStatus.loadingShow();
-
-  postApiService.fetchPost().then(data => {
-    const curentPage = postApiService.page - 1;
-    postApiService.hits = data.totalHits;
-
-    if (!data.totalHits) {
-      loadMoreBtn.hide();
-      pageLoadStatus.errorShow();
-
-      return Notify.failure(
-        'Sorry, there are no images matching your search query. Please try again.'
-      );
-    }
-
-    if (!data.hits.length) {
-      loadMoreBtn.hide();
-      pageLoadStatus.lastElemShow();
-      return;
-    }
-    renderPost(data.hits);
-    if (curentPage === 1) {
-      Notify.success(`Hooray! We found ${postApiService.hits} images.`);
-      loadMoreBtn.show();
-    }
-    pageLoadStatus.enable();
-  });
-}
-// Create markup posts
-function renderPost(data) {
-  let markupPost = data
-    .map(
-      ({
-        largeImageURL,
-        webformatURL,
-        tags,
-        likes,
-        views,
-        comments,
-        downloads,
-      }) => {
-        return `<a class="gallery__item" href="${largeImageURL}">
-                  <div class="photo-card">
-                      <img src="${webformatURL}" alt="${tags}" loading="lazy" />
-                      <div class="info">
-                        <p class="info-item"><b>Likes</b> ${likes}</p>
-                        <p class="info-item"><b>Views</b> ${views}</p>
-                        <p class="info-item"><b>Comments</b> ${comments}</p>
-                        <p class="info-item"><b>Downloads</b> ${downloads}</p>
-                      </div>
-                    </div>
-                 </a>`;
-      }
-    )
-    .join('');
-
-  refs.gallery.insertAdjacentHTML('beforeend', markupPost);
-  lightbox.refresh();
-  // smoothScroll();
+async function onLoadGallery() {
+  const res = await getData();
+  observerTarget.textContent = '';
+  buttonLoad.hidden = true;
+  createMarkup(res, gallery);
+  simpleLightbox.refresh();
+  if (pages === page) {
+    observerTarget.textContent =
+      "We're sorry, but you've reached the end of search results.";
+  }
+  if (page > 1 && !isInfinityLoad) scrollGallery(gallery);
+  if (pages > page && !isInfinityLoad) buttonLoad.hidden = false;
+  page += 1;
 }
 
-function clearGallery() {
-  refs.gallery.innerHTML = '';
+async function getData() {
+  try {
+    const responce = await fetchPixabay(userInput, page, perPage);
+    pages = Math.ceil(responce.data.total / perPage);
+    const searchResult = responce.data;
+    showMessage(searchResult, page, pages);
+    return searchResult.hits;
+  } catch (error) {
+    console.log('error :>> ', error.message);
+  }
 }
 
-function smoothScroll() {
-  const { height: cardHeight } = document
-    .querySelector('.gallery')
-    .firstElementChild.getBoundingClientRect();
-
-  window.scrollBy({
-    top: cardHeight * 2,
-    behavior: 'smooth',
-  });
-}
-
-async function onLoading(entries) {
-  await entries.forEach(entry => {
-    if (entry.isIntersecting) {
-      console.log(entry.isIntersecting);
-      fetchPosts();
+function handleIntersect(entries, observer) {
+  entries.forEach(async entry => {
+    if (entry.isIntersecting && userInput) await onLoadGallery();
+    if (pages < page) {
+      observer.unobserve(observerTarget);
     }
   });
+}
+
+function setInfinityLoad(event) {
+  isInfinityLoad = event.currentTarget.checked;
+  isInfinityLoad
+    ? observer.observe(observerTarget)
+    : observer.unobserve(observerTarget);
+  if (pages > page && !isInfinityLoad) buttonLoad.hidden = false;
 }
